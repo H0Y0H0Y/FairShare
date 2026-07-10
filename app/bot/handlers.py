@@ -109,6 +109,11 @@ async def settle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def settle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings()
     query = update.callback_query
+    # A settle-confirmation message is visible to everyone in a group, so a
+    # non-partner could tap the button. Authorize the tapper before acting.
+    if query.from_user.id not in settings.allowed_telegram_ids:
+        await query.answer("You're not authorized to use this bot.", show_alert=True)
+        return
     await query.answer()
     if query.data == CB_SETTLE_NO:
         await query.edit_message_text("Kept open. Nothing changed.")

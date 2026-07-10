@@ -3,6 +3,9 @@
 data/*
 !data/.gitkeep
 
+# Local-only deployment notes (keep out of the repo for now)
+DEPLOY.md
+
 # Python
 __pycache__/
 *.py[cod]
