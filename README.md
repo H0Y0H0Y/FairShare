@@ -39,16 +39,28 @@ Layering: `bot → ai + db → utils`. All AI access is isolated behind
 
 ## Models
 
-- **Vision** (`qwen/qwen-2.5-vl-72b-instruct`) — used whenever an image is present.
-- **Text** (`meta-llama/llama-3.1-8b-instruct`) — used for text-only logs and
-  in-flow adjustments, to keep token cost low.
+Both are configurable via env (`VISION_MODEL` / `TEXT_MODEL`) — see
+[`.env.example`](.env.example) for the current defaults. As of now:
+
+- **Vision** — `qwen/qwen-2.5-vl-72b-instruct`, used whenever an image is present
+  (receipts, photo + caption).
+- **Text** — `openai/gpt-4o-mini`, used for text-only logs and in-flow
+  adjustments. It's cheap, extracts custom splits reliably, and is served
+  first-party by OpenAI (no multi-provider routing).
+
+> **Why gpt-4o-mini for text?** Two cheaper open models were tried first and
+> rejected during live testing: `meta-llama/llama-3.1-8b-instruct` inconsistently
+> dropped explicit splits (logging 50/50 when the user said 500/200), and
+> `qwen/qwen-2.5-72b-instruct` was flaky under OpenRouter's provider
+> rate-limits/fallbacks. `gpt-4o-mini` was reliable across the board.
 
 > **Provider note.** OpenRouter exposes the OpenAI-compatible `/chat/completions`
 > API (it does **not** implement the Anthropic Messages API for third-party
-> models like Qwen/Llama — this was verified live). The bot therefore uses the
-> OpenAI SDK (`AsyncOpenAI`) with `base_url` pointed at OpenRouter and `image_url`
-> content blocks for vision. All AI access is isolated in `ai/client.py` +
-> `ai/parser.py`, so swapping providers is a two-file change.
+> models like Qwen/Llama — verified live). The bot therefore uses the OpenAI SDK
+> (`AsyncOpenAI`) with `base_url` pointed at OpenRouter and `image_url` content
+> blocks for vision. All AI access is isolated in `ai/client.py` +
+> `ai/parser.py`, so swapping providers/SDKs is a two-file change. The parser
+> also retries transient upstream failures (rate limits, bad-provider fallbacks).
 
 ## Setup
 
@@ -84,19 +96,30 @@ survives redeploys. The container runs as a non-root user that owns `/app/data`.
 
 ## Usage
 
-Send the bot an expense:
+**In a private chat** with the bot, just send the expense:
 
-- `Dinner 700, my share 500, yours 200`
+- `Lunch 450, my share 250` (the other share is derived)
 - a photo of a receipt (it reads the total)
 - a receipt photo **with a caption** like `my share is 500, yours is 200`
 
-Then Confirm / Edit / Cancel the draft.
+**In a group**, prefix it with `/add` (works with Telegram Group Privacy left on):
 
-| Command    | Description                                    |
-|------------|------------------------------------------------|
-| `/balance` | Who owes whom over open expenses               |
-| `/recent`  | Recent open expenses                           |
-| `/settle`  | Close all open expenses and reset the balance  |
-| `/cancel`  | Abandon the current draft                       |
-| `/help`    | Usage help                                     |
-```
+- `/add Lunch 450, my share 250`
+- a photo captioned `/add …`
+
+Either way the bot shows a draft — tap **✅ Confirm**, **✏️ Edit**, or **❌ Cancel**.
+To edit, send your correction (e.g. `my share 400`); **in a group you must _reply_
+to the bot's message** so it reaches the bot under Group Privacy.
+
+| Command    | Description                                          |
+|------------|------------------------------------------------------|
+| `/add`     | Log an expense in a group (e.g. `/add Taxi 300`)     |
+| `/summary` | Open transactions, per-partner totals, and who owes  |
+| `/balance` | One-line net: who owes whom over open expenses       |
+| `/recent`  | Recent open expenses                                 |
+| `/settle`  | Close all open expenses and reset the balance to zero|
+| `/cancel`  | Abandon the current draft                            |
+| `/help`    | Usage help                                           |
+
+`/settle` never deletes rows — it stamps open expenses as closed (`settlement_id`)
+and starts a fresh tally, so history is retained and fully auditable.
