@@ -117,6 +117,50 @@ async def test_open_summary():
         await db.close()
 
 
+async def test_delete_expense_removes_it_and_shares():
+    db = await _fresh_db()
+    try:
+        await repository.insert_expense_with_shares(db.conn, _draft(70000, 1, 50000, 20000), 111)
+        await repository.insert_expense_with_shares(db.conn, _draft(30000, 2, 15000, 15000), 222)
+
+        recent = await repository.get_recent(db.conn, open_only=True)
+        target = recent[-1].id  # the first-inserted (70000) one
+
+        ok = await repository.delete_expense(db.conn, target)
+        assert ok is True
+        assert await repository.get_expense(db.conn, target) is None
+        assert await repository.count_open(db.conn) == 1
+        # shares of the deleted expense are gone too
+        rows = await db.conn.execute_fetchall(
+            "SELECT COUNT(*) AS c FROM expense_shares WHERE expense_id = ?", (target,)
+        )
+        assert int(rows[0]["c"]) == 0
+
+        # balance now reflects only the remaining expense: Sheng paid 300, split
+        # evenly, so Mark owes his 150 share (net -15000 from Mark's view).
+        bal = await repository.get_open_balance(db.conn, 1, 2)
+        assert bal.net_cents == -15000
+
+        # deleting again is a no-op
+        assert await repository.delete_expense(db.conn, target) is False
+    finally:
+        await db.close()
+
+
+async def test_delete_protects_settled_expenses():
+    db = await _fresh_db()
+    try:
+        await repository.insert_expense_with_shares(db.conn, _draft(70000, 1, 50000, 20000), 111)
+        recent = await repository.get_recent(db.conn, open_only=True)
+        eid = recent[0].id
+        await repository.settle(db.conn, 1, 2)
+        # settled expense cannot be deleted
+        assert await repository.delete_expense(db.conn, eid) is False
+        assert await repository.get_expense(db.conn, eid, open_only=False) is not None
+    finally:
+        await db.close()
+
+
 async def test_recent_returns_open_only():
     db = await _fresh_db()
     try:

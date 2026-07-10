@@ -7,6 +7,7 @@ commands that sit alongside it.
 from __future__ import annotations
 
 import logging
+from html import escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -15,11 +16,16 @@ from telegram.ext import ContextTypes
 from app.bot.views import render_balance, render_recent, render_summary
 from app.config import get_settings
 from app.db import repository
+from app.utils.money import format_cents
 
 log = logging.getLogger(__name__)
 
 CB_SETTLE_YES = "st:yes"
 CB_SETTLE_NO = "st:no"
+
+CB_DEL_PICK = "del:pick:"  # + expense id
+CB_DEL_YES = "del:yes:"    # + expense id
+CB_DEL_NO = "del:no"
 
 _HELP = (
     "🤝 <b>FairShare</b> — shared expense tracker\n\n"
@@ -36,6 +42,7 @@ _HELP = (
     "/summary — open transactions, totals, and who owes whom\n"
     "/balance — who owes whom right now\n"
     "/recent — recent open expenses\n"
+    "/delete — remove an expense logged by mistake\n"
     "/settle — mark everything settled and reset the balance\n"
     "/cancel — abandon the current draft\n"
     "/help — this message"
@@ -129,6 +136,81 @@ async def settle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         + "\nBalance reset to zero. New expenses start a fresh tally.",
         parse_mode=ParseMode.HTML,
     )
+
+
+async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List open expenses as buttons so one can be picked for deletion."""
+    settings = get_settings()
+    db = context.bot_data["db"]
+    items = await repository.get_recent(db.conn, limit=10, open_only=True)
+    if not items:
+        await update.effective_message.reply_text("Nothing to delete — no open expenses.")
+        return
+    rows = []
+    for e in items:
+        label = f"{e.description} · {format_cents(e.total_cents, settings.currency_symbol)} · {e.expense_date[5:]}"
+        rows.append([InlineKeyboardButton(label[:60], callback_data=f"{CB_DEL_PICK}{e.id}")])
+    rows.append([InlineKeyboardButton("✖️ Close", callback_data=CB_DEL_NO)])
+    await update.effective_message.reply_text(
+        "🗑 <b>Delete which expense?</b>\n<i>Only open expenses are listed. Deletion is permanent.</i>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
+    query = update.callback_query
+    # Buttons are visible to everyone in a group — authorize the tapper.
+    if query.from_user.id not in settings.allowed_telegram_ids:
+        await query.answer("You're not authorized to use this bot.", show_alert=True)
+        return
+    await query.answer()
+    db = context.bot_data["db"]
+    data = query.data
+
+    if data == CB_DEL_NO:
+        await query.edit_message_text("Closed. Nothing was deleted.")
+        return
+
+    if data.startswith(CB_DEL_PICK):
+        expense_id = int(data[len(CB_DEL_PICK):])
+        e = await repository.get_expense(db.conn, expense_id, open_only=True)
+        if e is None:
+            await query.edit_message_text("That expense is no longer available.")
+            return
+        payer = settings.partner_by_id(e.paid_by)
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🗑 Delete", callback_data=f"{CB_DEL_YES}{expense_id}"),
+                    InlineKeyboardButton("↩️ Cancel", callback_data=CB_DEL_NO),
+                ]
+            ]
+        )
+        await query.edit_message_text(
+            f"Delete <b>{escape(e.description)}</b> · "
+            f"{format_cents(e.total_cents, settings.currency_symbol)} "
+            f"({e.expense_date}, paid by {escape(payer.name)})?\n"
+            f"<i>This can't be undone.</i>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb,
+        )
+        return
+
+    if data.startswith(CB_DEL_YES):
+        expense_id = int(data[len(CB_DEL_YES):])
+        ok = await repository.delete_expense(db.conn, expense_id)
+        if not ok:
+            await query.edit_message_text("That expense was already removed or is settled.")
+            return
+        p1, p2 = settings.partners[0].id, settings.partners[1].id
+        balance = await repository.get_open_balance(db.conn, p1, p2)
+        await query.edit_message_text(
+            "🗑 <b>Deleted.</b>\n" + render_balance(balance, settings),
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
 
 async def deny(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

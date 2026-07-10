@@ -157,6 +157,48 @@ async def get_open_summary(
     return OpenSummary(items=items, paid=paid, owed=owed, balance=balance)
 
 
+async def get_expense(
+    conn: aiosqlite.Connection, expense_id: int, open_only: bool = True
+) -> RecentExpense | None:
+    """Fetch a single expense (with its shares), or None if not found / not open."""
+    where = "AND settlement_id IS NULL" if open_only else ""
+    rows = await conn.execute_fetchall(
+        f"SELECT id, description, total_cents, paid_by, expense_date "
+        f"FROM expenses WHERE id = ? {where}",
+        (expense_id,),
+    )
+    if not rows:
+        return None
+    r = rows[0]
+    share_rows = await conn.execute_fetchall(
+        "SELECT partner_id, share_cents FROM expense_shares WHERE expense_id = ?",
+        (expense_id,),
+    )
+    shares = {int(s["partner_id"]): int(s["share_cents"]) for s in share_rows}
+    return RecentExpense(
+        id=int(r["id"]),
+        description=r["description"],
+        total_cents=int(r["total_cents"]),
+        paid_by=int(r["paid_by"]),
+        expense_date=r["expense_date"],
+        shares=shares,
+    )
+
+
+async def delete_expense(conn: aiosqlite.Connection, expense_id: int) -> bool:
+    """Permanently delete an OPEN expense and its shares. Returns True if a row
+    was removed. Settled expenses are protected (they belong to a snapshot)."""
+    rows = await conn.execute_fetchall(
+        "SELECT 1 FROM expenses WHERE id = ? AND settlement_id IS NULL", (expense_id,)
+    )
+    if not rows:
+        return False
+    await conn.execute("DELETE FROM expense_shares WHERE expense_id = ?", (expense_id,))
+    await conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+    await conn.commit()
+    return True
+
+
 async def get_recent(
     conn: aiosqlite.Connection, limit: int = 10, open_only: bool = True
 ) -> list[RecentExpense]:

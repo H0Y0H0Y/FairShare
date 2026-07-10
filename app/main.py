@@ -33,6 +33,7 @@ _COMMANDS = [
     BotCommand("summary", "Open transactions, totals, and who owes whom"),
     BotCommand("balance", "Who owes whom right now"),
     BotCommand("recent", "Recent open expenses"),
+    BotCommand("delete", "Remove an expense logged by mistake"),
     BotCommand("settle", "Settle up and reset the balance"),
     BotCommand("cancel", "Abandon the current draft"),
     BotCommand("help", "How to use FairShare"),
@@ -78,8 +79,10 @@ def main() -> None:
     app.add_handler(CommandHandler("summary", handlers.summary_cmd, filters=allowed))
     app.add_handler(CommandHandler("balance", handlers.balance_cmd, filters=allowed))
     app.add_handler(CommandHandler("recent", handlers.recent_cmd, filters=allowed))
+    app.add_handler(CommandHandler("delete", handlers.delete_cmd, filters=allowed))
     app.add_handler(CommandHandler("settle", handlers.settle_cmd, filters=allowed))
     app.add_handler(CallbackQueryHandler(handlers.settle_callback, pattern="^st:"))
+    app.add_handler(CallbackQueryHandler(handlers.delete_callback, pattern="^del:"))
 
     app.add_error_handler(_on_error)
 
