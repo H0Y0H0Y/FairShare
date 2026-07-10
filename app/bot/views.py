@@ -51,46 +51,46 @@ def render_balance(balance: Balance, settings: Settings) -> str:
     return f"⚖️ <b>{escape(debtor.name)}</b> owes <b>{escape(creditor.name)}</b> {amount}"
 
 
-def render_summary(summary: OpenSummary, settings: Settings) -> str:
-    p1, p2 = settings.partners[0], settings.partners[1]
+_DIVIDER = "──────────────"
 
-    if not summary.items:
-        return "📊 <b>Open summary</b>\n\nNo open transactions — you're all square. ⚖️"
 
-    lines = [f"📊 <b>Open summary</b> — {len(summary.items)} transaction(s)", ""]
-    for e in summary.items:
-        payer = settings.partner_by_id(e.paid_by)
-        split = " / ".join(
-            f"{escape(p.name)} {_money(e.shares.get(p.id, 0), settings)}"
-            for p in settings.partners
-        )
-        lines.append(
-            f"#{e.id} · {e.expense_date} · {escape(e.description)} — "
-            f"{_money(e.total_cents, settings)}\n"
-            f"    paid by {escape(payer.name)} · split: {split}"
-        )
-
-    lines.append("")
-    lines.append("<b>Totals (open)</b>")
-    for p in settings.partners:
-        lines.append(
-            f"  • {escape(p.name)}: paid {_money(summary.paid.get(p.id, 0), settings)}, "
-            f"owes-share {_money(summary.owed.get(p.id, 0), settings)}"
-        )
-
-    lines.append("")
-    lines.append(render_balance(summary.balance, settings))
+def _entry_block(e: RecentExpense, settings: Settings, with_split: bool) -> str:
+    """One expense rendered as a compact multi-line block (no record id)."""
+    payer = settings.partner_by_id(e.paid_by)
+    lines = [
+        f"🧾 <b>{escape(e.description)}</b> · {_money(e.total_cents, settings)}",
+        f"📅 {e.expense_date} — paid by {escape(payer.name)}",
+    ]
+    if with_split:
+        for p in settings.partners:
+            lines.append(f"      {escape(p.name)}: {_money(e.shares.get(p.id, 0), settings)}")
     return "\n".join(lines)
+
+
+def render_summary(summary: OpenSummary, settings: Settings) -> str:
+    if not summary.items:
+        return "📊 <b>Open Summary</b>\n\nNo open transactions — you're all square. ⚖️"
+
+    count = len(summary.items)
+    blocks = [_entry_block(e, settings, with_split=True) for e in summary.items]
+
+    totals = [
+        f"      {escape(p.name)}: paid {_money(summary.paid.get(p.id, 0), settings)}"
+        f" · share {_money(summary.owed.get(p.id, 0), settings)}"
+        for p in settings.partners
+    ]
+
+    sections = [
+        f"📊 <b>Open Summary</b>\n{count} open transaction{'s' if count != 1 else ''}",
+        "\n\n".join(blocks),
+        _DIVIDER + "\n<b>Totals</b>\n" + "\n".join(totals),
+        render_balance(summary.balance, settings),
+    ]
+    return "\n\n".join(sections)
 
 
 def render_recent(items: list[RecentExpense], settings: Settings) -> str:
     if not items:
-        return "No open expenses yet."
-    lines = ["🗒️ <b>Recent open expenses</b>"]
-    for e in items:
-        payer = settings.partner_by_id(e.paid_by)
-        lines.append(
-            f"#{e.id} · {e.expense_date} · {escape(e.description)} — "
-            f"{_money(e.total_cents, settings)} (paid by {escape(payer.name)})"
-        )
-    return "\n".join(lines)
+        return "🗒️ <b>Recent open expenses</b>\n\nNo open expenses yet."
+    blocks = [_entry_block(e, settings, with_split=False) for e in items]
+    return "🗒️ <b>Recent open expenses</b>\n\n" + "\n\n".join(blocks)
