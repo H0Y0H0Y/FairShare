@@ -133,10 +133,13 @@ async def on_confirm_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
 
     if query.data == CB_EDIT:
+        in_group = update.effective_chat.type != "private"
+        reply_hint = " (in a group, <b>reply</b> to this message)" if in_group else ""
         await query.edit_message_text(
             render_draft(draft, settings)
-            + "\n\n✏️ Send your correction (e.g. “my share 400”, "
-            "“paid by them”, “date yesterday”, “total 720”).",
+            + f"\n\n✏️ Send a correction{reply_hint} — e.g. “my share 400”, "
+            "“paid by them”, “date yesterday”, “total 720” — "
+            "or send the receipt photo to re-read it.",
             parse_mode=ParseMode.HTML,
         )
         return ADJUSTING
@@ -238,7 +241,12 @@ def build_conversation_handler() -> ConversationHandler:
         ],
         states={
             CONFIRMING: [CallbackQueryHandler(on_confirm_choice, pattern="^cf:")],
-            ADJUSTING: [MessageHandler(content & filters.TEXT, on_adjust)],
+            ADJUSTING: [
+                # A receipt photo re-reads the expense from the image (replaces draft).
+                MessageHandler(content & filters.PHOTO, on_input),
+                # A text message is a natural-language correction.
+                MessageHandler(content & filters.TEXT, on_adjust),
+            ],
             ConversationHandler.TIMEOUT: [
                 MessageHandler(filters.ALL, on_timeout),
                 CallbackQueryHandler(on_timeout),
