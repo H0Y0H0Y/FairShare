@@ -1,0 +1,12 @@
+# Local dev + reference for Dokploy. On Dokploy, map a persistent volume/host
+# path to /app/data so the SQLite database survives redeploys.
+services:
+  fairshare:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - fairshare_data:/app/data
+
+volumes:
+  fairshare_data:
