@@ -30,14 +30,15 @@ The JSON MUST have exactly these keys: "description", "total", "paid_by", \
 "date", "shares", "split_specified", "items".
 
 Hard rules:
-- "description" is a SHORT label for WHAT this expense actually is — 1 to 3 words, \
-derived from the message or receipt. It is NOT always food: it may be dining, \
-groceries, transport, shopping, household, utilities, health, entertainment, or \
-anything else. Examples across categories: "Lunch", "Groceries", "Taxi", \
-"Movie tickets", "Pharmacy", "Fuel", "Electricity bill", "Hardware store". \
-Pick the label that fits THIS transaction — do NOT copy "Lunch" from the example \
-below unless the expense really is lunch. Do NOT include the venue name, address, \
-location, or any person's name in the description.
+- "description" is a SHORT label for WHAT this expense is — 1 to 3 words, derived \
+from the message or receipt. PREFER the merchant / venue / restaurant / store name \
+when it is identifiable (e.g. "Marugame", "7-Eleven", "Starbucks", "Shell"); \
+otherwise use a category. It is NOT always food: it may be dining, groceries, \
+transport, shopping, household, utilities, health, or entertainment. Examples: \
+"Marugame", "Groceries", "Grab ride", "Watsons", "Shell fuel", "Netflix". Pick \
+what fits THIS transaction — do NOT copy "Lunch" from the example below unless the \
+expense really is a plain lunch. Keep the venue/brand name if present; only drop a \
+street address or a person's name.
 - "paid_by" MUST be the literal string "{partner1_name}" or "{partner2_name}". \
 Never invent a name, and never output a placeholder like "PERSON_NAME".
 - "shares" MUST have exactly these two keys: "{partner1_name}" and "{partner2_name}". \
@@ -73,10 +74,11 @@ If both an image and a text caption are provided, the caption takes priority for
 the split and amounts; use the image to fill in anything the caption omits (such \
 as the total or a description).
 
-When a receipt image is present, read the merchant name and line items to decide \
-what the expense actually is, then write that as "description" (e.g. a grocery \
-store -> "Groceries", a pharmacy -> "Pharmacy", a gas station -> "Fuel", a \
-restaurant -> "Dinner"). Do NOT assume it is food.
+When a receipt image is present, read the merchant name printed on it and use it \
+as the "description" (e.g. a receipt from "Marugame Udon" -> "Marugame", from \
+"7-Eleven" -> "7-Eleven"). Only if no merchant name is legible, fall back to a \
+category based on the line items (groceries, fuel, pharmacy, ...). Do NOT assume \
+it is food.
 
 {_contract(partner1_name, partner2_name, today)}"""
 
@@ -93,8 +95,17 @@ Today's date is {today}.
 
 You will be given the CURRENT draft as JSON and a correction in natural language \
 (e.g. "my share is 400", "paid by {partner2_name}", "date yesterday", \
-"it was 720 total"). Apply ONLY the requested change; keep everything else the \
-same. Re-balance the shares so they still sum to the total.
+"it was 720 total", "description Marugame", "call it Groceries"). Apply ONLY the \
+requested change; keep everything else the same. Re-balance the shares so they \
+still sum to the total.
+
+If the correction sets or changes the description (e.g. "description X", \
+"call it X", "name it X", "rename to X", "what: X", "it's X"), set "description" \
+to the user's EXACT text, verbatim. This overrides every other rule about \
+"description" below — an explicit description from the user is ALWAYS honored, \
+even when it is a venue, brand, restaurant, or store name (e.g. "Marugame", \
+"7-Eleven"). Do NOT rewrite it into a generic category and do NOT fall back to \
+"Lunch".
 
 The draft may include an "items" list (the individual receipt lines with prices). \
 Use it when the correction refers to items instead of amounts:

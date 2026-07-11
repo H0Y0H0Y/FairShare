@@ -182,6 +182,47 @@ async def test_parse_skips_malformed_items(monkeypatch):
     assert [(i.name, i.price_cents) for i in draft.line_items] == [("Milk", 25000)]
 
 
+async def test_explicit_description_extraction():
+    assert parser._explicit_description("description Marugame") == "Marugame"
+    assert parser._explicit_description("desc: Marugame Udon") == "Marugame Udon"
+    assert parser._explicit_description("call it Marugame") == "Marugame"
+    assert parser._explicit_description("name it 7-Eleven") == "7-Eleven"
+    assert parser._explicit_description('rename to "Groceries"') == "Groceries"
+    # Guards: split phrases, multi-intent, and unrelated corrections are ignored.
+    assert parser._explicit_description("call it even") is None
+    assert parser._explicit_description("call it Marugame, my share 300") is None
+    assert parser._explicit_description("my share is 400") is None
+
+
+async def test_merge_forces_explicit_description_over_model(monkeypatch):
+    """User renames to a venue; the model (per its no-venue-name rule) returns a
+    generic "Lunch" — the deterministic override must win."""
+    from app.models import ExpenseDraft
+
+    current = ExpenseDraft(
+        description="Lunch",
+        total_cents=45000,
+        paid_by=1,
+        expense_date="2026-07-10",
+        shares={1: 22500, 2: 22500},
+    )
+    _patch_model(
+        monkeypatch,
+        [
+            '{"description":"Lunch","total":450,"paid_by":"Mark",'
+            '"date":"2026-07-10","shares":{"Mark":225,"Alex":225},'
+            '"split_specified":true}'
+        ],
+    )
+    updated = await parser.merge_expense(
+        current=current,
+        correction="description Marugame",
+        sender=_sender(),
+        today="2026-07-10",
+    )
+    assert updated.description == "Marugame"
+
+
 async def test_merge_applies_item_based_split(monkeypatch):
     """User references items ('the salad'); the model returns an item-based split
     and drops the items list from its reply — parser must keep the items."""

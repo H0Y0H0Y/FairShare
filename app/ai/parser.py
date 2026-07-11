@@ -30,6 +30,44 @@ log = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
 
+# Corrections that explicitly rename the expense. The small text model tends to
+# rewrite an explicit description (esp. a venue/brand name) back into a generic
+# category, so we honor these deterministically and override the model's output.
+_DESCRIPTION_CORRECTION_RES = (
+    re.compile(r"^\s*(?:set\s+)?desc(?:ription)?\s*(?:to|is|=|:)?\s+(.+)$", re.IGNORECASE),
+    re.compile(r"^\s*rename\s+(?:it\s+)?to\s+(.+)$", re.IGNORECASE),
+    re.compile(r"^\s*(?:re)?name\s+it\s+(?:to\s+)?(.+)$", re.IGNORECASE),
+    re.compile(r"^\s*call\s+it\s+(.+)$", re.IGNORECASE),
+    re.compile(r"^\s*what\s*(?:is|=|:)\s+(.+)$", re.IGNORECASE),
+)
+# Words that mean "how to split", not a name — keep these out of the description.
+_SPLIT_WORDS = {"even", "evenly", "dutch", "half", "in half", "50/50", "50-50", "equally"}
+
+
+def _explicit_description(correction: str) -> str | None:
+    """Return a description the user explicitly asked for, or None.
+
+    Only fires on a clean single-intent rename so it can't swallow a combined
+    correction like "call it Marugame, my share 300" (left to the model) or a
+    split phrase like "call it even"."""
+    for pattern in _DESCRIPTION_CORRECTION_RES:
+        match = pattern.match(correction)
+        if not match:
+            continue
+        value = match.group(1).strip().strip("\"'“”‘’").strip()
+        low = value.lower()
+        if not value or low in _SPLIT_WORDS:
+            return None
+        # List separators or a standalone number token (e.g. a share amount) signal
+        # a multi-part correction — defer to the model. Digits *inside* a name like
+        # "7-Eleven" are fine; a bare "300" token is not.
+        if "," in value or " and " in low:
+            return None
+        if any(re.fullmatch(r"[$€£₱¥]?\d[\d.,]*", tok) for tok in value.split()):
+            return None
+        return value[:200]
+    return None
+
 
 class ParseError(Exception):
     """Raised when the model output cannot be turned into a valid draft."""
@@ -292,4 +330,9 @@ async def merge_expense(
     # from its reply even when they still apply to the expense.
     if not draft.line_items and current.line_items:
         draft.line_items = list(current.line_items)
+    # Honor an explicit rename verbatim, overriding the model (which likes to
+    # collapse a venue/brand name back into a generic category like "Lunch").
+    forced_description = _explicit_description(correction)
+    if forced_description:
+        draft.description = forced_description
     return draft
