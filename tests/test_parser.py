@@ -135,3 +135,83 @@ async def test_parse_invalid_date_falls_back_to_today(monkeypatch):
         today="2026-07-10",
     )
     assert draft.expense_date == "2026-07-10"
+
+
+async def test_parse_reads_receipt_line_items(monkeypatch):
+    _patch_model(
+        monkeypatch,
+        [
+            '{"description":"Groceries","total":450,"paid_by":"Mark",'
+            '"date":"2026-07-10","shares":{"Mark":225,"Alex":225},'
+            '"split_specified":false,'
+            '"items":[{"name":"Caesar salad","price":250},'
+            '{"name":"Iced coffee","price":200}]}'
+        ],
+    )
+    draft = await parser.parse_expense(
+        text=None,
+        image_b64="ZmFrZQ==",
+        image_media_type="image/jpeg",
+        sender=_sender(),
+        today="2026-07-10",
+    )
+    assert [(i.name, i.price_cents) for i in draft.line_items] == [
+        ("Caesar salad", 25000),
+        ("Iced coffee", 20000),
+    ]
+
+
+async def test_parse_skips_malformed_items(monkeypatch):
+    _patch_model(
+        monkeypatch,
+        [
+            '{"description":"Groceries","total":250,"paid_by":"Mark",'
+            '"date":"2026-07-10","shares":{"Mark":125,"Alex":125},'
+            '"split_specified":false,'
+            '"items":[{"name":"Milk","price":250},{"name":"","price":100},'
+            '{"name":"Bad","price":"n/a"},"not-a-dict"]}'
+        ],
+    )
+    draft = await parser.parse_expense(
+        text=None,
+        image_b64="ZmFrZQ==",
+        image_media_type="image/jpeg",
+        sender=_sender(),
+        today="2026-07-10",
+    )
+    assert [(i.name, i.price_cents) for i in draft.line_items] == [("Milk", 25000)]
+
+
+async def test_merge_applies_item_based_split(monkeypatch):
+    """User references items ('the salad'); the model returns an item-based split
+    and drops the items list from its reply — parser must keep the items."""
+    from app.models import ExpenseDraft, LineItem
+
+    current = ExpenseDraft(
+        description="Lunch",
+        total_cents=45000,
+        paid_by=1,
+        expense_date="2026-07-10",
+        shares={1: 22500, 2: 22500},
+        line_items=[
+            LineItem(name="Caesar salad", price_cents=25000),
+            LineItem(name="Iced coffee", price_cents=20000),
+        ],
+    )
+    _patch_model(
+        monkeypatch,
+        [
+            '{"description":"Lunch","total":450,"paid_by":"Mark",'
+            '"date":"2026-07-10","shares":{"Mark":250,"Alex":200},'
+            '"split_specified":true}'
+        ],
+    )
+    updated = await parser.merge_expense(
+        current=current,
+        correction="my share is just the salad",
+        sender=_sender(),
+        today="2026-07-10",
+    )
+    assert updated.shares == {1: 25000, 2: 20000}
+    # Items survive the correction even though the model omitted them.
+    assert [i.name for i in updated.line_items] == ["Caesar salad", "Iced coffee"]

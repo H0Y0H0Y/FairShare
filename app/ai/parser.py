@@ -21,7 +21,7 @@ from app.ai.prompts import (
 )
 from app.ai.router import pick_model
 from app.config import PartnerConfig, get_settings
-from app.models import ExpenseDraft
+from app.models import ExpenseDraft, LineItem
 from app.utils.money import split_even, to_cents
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -113,6 +113,27 @@ def _resolve_partner_id(raw: str, sender: PartnerConfig, other: PartnerConfig) -
     raise ParseError(f"could not resolve partner name: {raw!r}")
 
 
+def _parse_line_items(raw: object) -> list[LineItem]:
+    """Pull an itemized receipt list out of the model output. Best-effort: any
+    entry without a usable name and price is skipped rather than failing the
+    whole parse (the items are an aid for splitting, not core to the expense)."""
+    if not isinstance(raw, list):
+        return []
+    items: list[LineItem] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()[:100]
+        if not name:
+            continue
+        try:
+            price_cents = to_cents(entry.get("price"))
+        except (ValueError, TypeError):
+            continue
+        items.append(LineItem(name=name, price_cents=price_cents))
+    return items
+
+
 def _valid_date(value: object, today: str) -> str:
     if isinstance(value, str):
         try:
@@ -174,6 +195,7 @@ def _dict_to_draft(
         shares=shares,
         raw_input=raw_input,
         split_inferred=inferred,
+        line_items=_parse_line_items(data.get("items")),
     )
 
 
@@ -248,6 +270,13 @@ async def merge_expense(
         },
         "split_specified": True,
     }
+    # Carry the itemized receipt lines so a correction can reference them
+    # ("my share is the salad and the coffee", "split each item in half").
+    if current.line_items:
+        current_view["items"] = [
+            {"name": item.name, "price": item.price_cents / 100}
+            for item in current.line_items
+        ]
 
     system = build_merge_system_prompt(
         partner1_name=settings.partners[0].name,
@@ -259,4 +288,8 @@ async def merge_expense(
     data = await _call_and_parse(system, content, settings.text_model)
 
     draft = _dict_to_draft(data, sender, other, today, current.raw_input)
+    # Keep the receipt items across corrections; the text model often omits them
+    # from its reply even when they still apply to the expense.
+    if not draft.line_items and current.line_items:
+        draft.line_items = list(current.line_items)
     return draft

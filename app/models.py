@@ -8,6 +8,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 
+@dataclass(frozen=True)
+class LineItem:
+    """A single itemized line read off a receipt. Kept on the draft so item-level
+    corrections ("my share is the salad and the coffee", "split each item in
+    half") can be resolved during the adjust step."""
+
+    name: str
+    price_cents: int
+
+
 @dataclass
 class ExpenseDraft:
     """A parsed-but-uncommitted expense, held in ``context.user_data`` during the
@@ -21,6 +31,8 @@ class ExpenseDraft:
     raw_input: str = ""
     # True when the AI did not give an explicit split and we defaulted to 50/50.
     split_inferred: bool = False
+    # Itemized receipt lines, when parsed from an image. Empty for text entries.
+    line_items: list[LineItem] = field(default_factory=list)
 
     def shares_sum(self) -> int:
         return sum(self.shares.values())
@@ -29,7 +41,7 @@ class ExpenseDraft:
         return self.shares_sum() == self.total_cents
 
     def copy(self) -> "ExpenseDraft":
-        return replace(self, shares=dict(self.shares))
+        return replace(self, shares=dict(self.shares), line_items=list(self.line_items))
 
 
 @dataclass(frozen=True)
