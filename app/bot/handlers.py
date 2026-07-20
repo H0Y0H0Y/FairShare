@@ -97,6 +97,22 @@ async def settle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.effective_message.reply_text("Nothing to settle — no open expenses.")
         return
     balance = await repository.get_open_balance(db.conn, p1, p2)
+    balance_line = render_balance(balance, settings)
+
+    # Only the creditor may confirm, so only show the button to them. In a group
+    # the message (and its button) is visible to both partners, so we gate on who
+    # ran /settle: the person confirming must be the one who is owed.
+    caller = settings.partner_by_telegram_id(update.effective_user.id)
+    if caller is None or not balance.may_confirm_settle(caller.id):
+        creditor = settings.partner_by_id(balance.creditor_id)
+        await update.effective_message.reply_text(
+            balance_line
+            + f"\n\nOnly <b>{escape(creditor.name)}</b> — who is owed — can settle. "
+            f"Ask them to run /settle to confirm.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
     kb = InlineKeyboardMarkup(
         [
             [
@@ -105,18 +121,10 @@ async def settle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ]
         ]
     )
-    prompt = (
-        render_balance(balance, settings)
-        + f"\n\nSettling will close {open_count} open expense(s) and reset the balance to zero."
-    )
-    if balance.creditor_id is not None:
-        creditor = settings.partner_by_id(balance.creditor_id)
-        prompt += (
-            f"\n\n<i>Only {escape(creditor.name)} — who is owed — can confirm this.</i>"
-        )
-    prompt += "\n\nProceed?"
     await update.effective_message.reply_text(
-        prompt,
+        balance_line
+        + f"\n\nSettling will close {open_count} open expense(s) and reset the balance to zero."
+        + "\n\nProceed?",
         parse_mode=ParseMode.HTML,
         reply_markup=kb,
     )
