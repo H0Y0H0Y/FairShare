@@ -105,9 +105,18 @@ async def settle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ]
         ]
     )
-    await update.effective_message.reply_text(
+    prompt = (
         render_balance(balance, settings)
-        + f"\n\nSettling will close {open_count} open expense(s) and reset the balance to zero. Proceed?",
+        + f"\n\nSettling will close {open_count} open expense(s) and reset the balance to zero."
+    )
+    if balance.creditor_id is not None:
+        creditor = settings.partner_by_id(balance.creditor_id)
+        prompt += (
+            f"\n\n<i>Only {escape(creditor.name)} — who is owed — can confirm this.</i>"
+        )
+    prompt += "\n\nProceed?"
+    await update.effective_message.reply_text(
+        prompt,
         parse_mode=ParseMode.HTML,
         reply_markup=kb,
     )
@@ -121,13 +130,28 @@ async def settle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.from_user.id not in settings.allowed_telegram_ids:
         await query.answer("You're not authorized to use this bot.", show_alert=True)
         return
-    await query.answer()
     if query.data == CB_SETTLE_NO:
+        await query.answer()
         await query.edit_message_text("Kept open. Nothing changed.")
         return
 
     db = context.bot_data["db"]
     p1, p2 = settings.partners[0].id, settings.partners[1].id
+
+    # Only the partner who is owed may confirm the settlement — they're the one
+    # acknowledging the money reached them. Whoever opened /settle, the button is
+    # visible to both, so gate the destructive action on the creditor here.
+    balance = await repository.get_open_balance(db.conn, p1, p2)
+    tapper = settings.partner_by_telegram_id(query.from_user.id)
+    if tapper is None or not balance.may_confirm_settle(tapper.id):
+        creditor = settings.partner_by_id(balance.creditor_id)
+        await query.answer(
+            f"Only {creditor.name} — who is owed — can confirm this is settled.",
+            show_alert=True,
+        )
+        return
+
+    await query.answer()
     balance, _settlement_id = await repository.settle(db.conn, p1, p2)
     settled_line = render_balance(balance, settings)
     await query.edit_message_text(

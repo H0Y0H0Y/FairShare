@@ -76,6 +76,15 @@ class Balance:
     def magnitude_cents(self) -> int:
         return abs(self.net_cents)
 
+    def may_confirm_settle(self, partner_id: int) -> bool:
+        """Whether ``partner_id`` is allowed to confirm a settlement.
+
+        Only the creditor — the partner who is owed — can confirm, since they're
+        the one acknowledging the money actually reached them. When it's all
+        square (no creditor), either partner may close things out.
+        """
+        return self.creditor_id is None or partner_id == self.creditor_id
+
 
 @dataclass(frozen=True)
 class RecentExpense:

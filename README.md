@@ -12,7 +12,8 @@ balance you can reset whenever you settle up.
   (Confirm / Edit / Cancel) before it's written.
 - **Custom splits** — an explicit per-partner amount per expense (not just 50/50).
 - **Running balance + settle** — `/balance` shows the net; `/settle` closes open
-  expenses and resets the tally (history is kept).
+  expenses and resets the tally (history is kept). Only the partner who is
+  **owed** can confirm a settlement — they acknowledge the money reached them.
 - **Private** — only whitelisted Telegram IDs can use it.
 - **Durable** — SQLite on a persistent volume; money stored as integer cents.
 
@@ -91,7 +92,7 @@ _reply_ to the bot's message** so it reaches the bot under Group Privacy.
 | `/summary` | Open transactions, per-partner totals, and who owes  |
 | `/balance` | Net: who owes whom over open expenses                |
 | `/recent`  | Recent open expenses                                 |
-| `/settle`  | Close all open expenses and reset the balance        |
+| `/settle`  | Close all open expenses and reset the balance (the person owed confirms) |
 | `/cancel`  | Abandon the current draft                            |
 | `/help`    | Usage help                                           |
 
