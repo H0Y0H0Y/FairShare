@@ -13,7 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from app.bot.views import render_balance, render_recent, render_summary
+from app.bot.views import mention, render_balance, render_recent, render_summary
 from app.config import get_settings
 from app.db import repository
 from app.utils.money import format_cents
@@ -107,7 +107,7 @@ async def settle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         creditor = settings.partner_by_id(balance.creditor_id)
         await update.effective_message.reply_text(
             balance_line
-            + f"\n\nOnly <b>{escape(creditor.name)}</b> — who is owed — can settle. "
+            + f"\n\nOnly {mention(creditor)} — who is owed — can settle. "
             f"Ask them to run /settle to confirm.",
             parse_mode=ParseMode.HTML,
         )

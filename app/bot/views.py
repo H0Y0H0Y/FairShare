@@ -7,13 +7,23 @@ from __future__ import annotations
 
 from html import escape
 
-from app.config import Settings
+from app.config import PartnerConfig, Settings
 from app.models import Balance, ExpenseDraft, OpenSummary, RecentExpense
 from app.utils.money import format_cents
 
 
 def _money(cents: int, settings: Settings) -> str:
     return format_cents(cents, settings.currency_symbol)
+
+
+def mention(partner: PartnerConfig) -> str:
+    """An inline mention that pings the partner.
+
+    Only notifies when the message lands in a chat the partner is a member of
+    (i.e. the shared group); in a 1:1 chat with the bot it renders as a plain
+    clickable name.
+    """
+    return f'<a href="tg://user?id={partner.telegram_id}">{escape(partner.name)}</a>'
 
 
 def render_draft(draft: ExpenseDraft, settings: Settings) -> str:
